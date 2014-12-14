@@ -25,10 +25,8 @@ import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.Message;
-import android.provider.Contacts.Intents;
 import android.provider.ContactsContract;
 import android.provider.ContactsContract.QuickContact;
 import android.util.AttributeSet;
@@ -40,9 +38,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.thoughtcrime.securesms.contacts.ContactPhotoFactory;
 import org.thoughtcrime.securesms.crypto.MasterSecret;
 import org.thoughtcrime.securesms.database.DatabaseFactory;
-import org.thoughtcrime.securesms.contacts.ContactPhotoFactory;
 import org.thoughtcrime.securesms.database.MmsDatabase;
 import org.thoughtcrime.securesms.database.SmsDatabase;
 import org.thoughtcrime.securesms.database.model.MediaMmsMessageRecord;
@@ -60,6 +58,8 @@ import org.thoughtcrime.securesms.util.Dialogs;
 import org.thoughtcrime.securesms.util.Emoji;
 import org.thoughtcrime.securesms.util.FutureTaskListener;
 import org.thoughtcrime.securesms.util.ListenableFutureTask;
+
+import java.util.Set;
 
 /**
  * A view that displays an individual conversation item within a conversation
@@ -81,13 +81,13 @@ public class ConversationItem extends LinearLayout {
                                                       R.attr.conversation_item_sent_push_pending_background,
                                                       R.attr.conversation_item_sent_push_pending_triangle_background};
 
-  private final static int SENT_PUSH = 0;
-  private final static int SENT_PUSH_TRIANGLE = 1;
-  private final static int SENT_SMS = 2;
-  private final static int SENT_SMS_TRIANGLE = 3;
-  private final static int SENT_SMS_PENDING = 4;
-  private final static int SENT_SMS_PENDING_TRIANGLE = 5;
-  private final static int SENT_PUSH_PENDING = 6;
+  private final static int SENT_PUSH                  = 0;
+  private final static int SENT_PUSH_TRIANGLE         = 1;
+  private final static int SENT_SMS                   = 2;
+  private final static int SENT_SMS_TRIANGLE          = 3;
+  private final static int SENT_SMS_PENDING           = 4;
+  private final static int SENT_SMS_PENDING_TRIANGLE  = 5;
+  private final static int SENT_PUSH_PENDING          = 6;
   private final static int SENT_PUSH_PENDING_TRIANGLE = 7;
 
   private Handler       failedIconHandler;
@@ -108,13 +108,14 @@ public class ConversationItem extends LinearLayout {
   private  View      triangleTick;
   private  ImageView pendingIndicator;
 
-  private  View      mmsContainer;
-  private  ImageView mmsThumbnail;
-  private  Button    mmsDownloadButton;
-  private  TextView  mmsDownloadingLabel;
-  private  ListenableFutureTask<SlideDeck> slideDeck;
-  private  FutureTaskListener<SlideDeck> slideDeckListener;
-  private  TypedArray backgroundDrawables;
+  private Set<MessageRecord>              batchSelected;
+  private View                            mmsContainer;
+  private ImageView                       mmsThumbnail;
+  private Button                          mmsDownloadButton;
+  private TextView                        mmsDownloadingLabel;
+  private ListenableFutureTask<SlideDeck> slideDeck;
+  private FutureTaskListener<SlideDeck>   slideDeckListener;
+  private TypedArray                      backgroundDrawables;
 
   private final FailedIconClickListener failedIconClickListener         = new FailedIconClickListener();
   private final MmsDownloadClickListener mmsDownloadClickListener       = new MmsDownloadClickListener();
@@ -159,17 +160,18 @@ public class ConversationItem extends LinearLayout {
     if (mmsDownloadButton != null) mmsDownloadButton.setOnClickListener(mmsDownloadClickListener);
   }
 
-  public void set(MasterSecret masterSecret, MessageRecord messageRecord,
+  public void set(MasterSecret masterSecret, MessageRecord messageRecord, Set<MessageRecord> batchSelected,
                   Handler failedIconHandler, boolean groupThread, boolean pushDestination)
   {
-
-    this.messageRecord     = messageRecord;
     this.masterSecret      = masterSecret;
+    this.messageRecord     = messageRecord;
+    this.batchSelected     = batchSelected;
     this.failedIconHandler = failedIconHandler;
     this.groupThread       = groupThread;
     this.pushDestination   = pushDestination;
 
-    setBackgroundDrawables(messageRecord);
+    setConversationBackgroundDrawables(messageRecord);
+    setSelectionBackgroundDrawables(messageRecord);
     setBodyText(messageRecord);
 
     if (!messageRecord.isGroupAction()) {
@@ -211,28 +213,44 @@ public class ConversationItem extends LinearLayout {
 
   /// MessageRecord Attribute Parsers
 
-  private void setBackgroundDrawables(MessageRecord messageRecord) {
+  private void setConversationBackgroundDrawables(MessageRecord messageRecord) {
     if (conversationParent != null && backgroundDrawables != null) {
       if (messageRecord.isOutgoing()) {
         final int background;
         final int triangleBackground;
         if (messageRecord.isPending() && pushDestination && !messageRecord.isForcedSms()) {
-          background = SENT_PUSH_PENDING;
+          background         = SENT_PUSH_PENDING;
           triangleBackground = SENT_PUSH_PENDING_TRIANGLE;
         } else if (messageRecord.isPending() || messageRecord.isPendingSmsFallback()) {
-          background = SENT_SMS_PENDING;
+          background         = SENT_SMS_PENDING;
           triangleBackground = SENT_SMS_PENDING_TRIANGLE;
         } else if (messageRecord.isPush()) {
-          background = SENT_PUSH;
+          background         = SENT_PUSH;
           triangleBackground = SENT_PUSH_TRIANGLE;
         } else {
-          background = SENT_SMS;
+          background         = SENT_SMS;
           triangleBackground = SENT_SMS_TRIANGLE;
         }
+
         setViewBackgroundWithoutResettingPadding(conversationParent, backgroundDrawables.getResourceId(background, -1));
         setViewBackgroundWithoutResettingPadding(triangleTick, backgroundDrawables.getResourceId(triangleBackground, -1));
       }
     }
+  }
+
+  private void setSelectionBackgroundDrawables(MessageRecord messageRecord) {
+    int[]      attributes = new int[]{R.attr.conversation_list_item_background_selected,
+                                      R.attr.conversation_item_background};
+
+    TypedArray drawables  = context.obtainStyledAttributes(attributes);
+
+    if (batchSelected.contains(messageRecord)) {
+      setBackgroundDrawable(drawables.getDrawable(0));
+    } else {
+      setBackgroundDrawable(drawables.getDrawable(1));
+    }
+
+    drawables.recycle();
   }
 
   private void setBodyText(MessageRecord messageRecord) {
